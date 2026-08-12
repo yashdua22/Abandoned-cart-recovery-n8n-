@@ -1,0 +1,440 @@
+{
+  "name": "Abandoned Cart Recovery",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cart-created",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 0],
+      "id": "node-webhook-cart-created",
+      "name": "Webhook - cart created",
+      "webhookId": "REPLACE_WITH_YOUR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cart_id": "={{ $json.body.cart_id }}",
+            "name": "={{ $json.body.name }}",
+            "email": "={{ $json.body.email }}",
+            "phone": "={{ $json.body.phone }}",
+            "items": "={{ $json.body.items }}",
+            "total": "={{ $json.body.total }}",
+            "status": "abandoned",
+            "updated_at": "={{ $now }}",
+            "recovery-mail": "no",
+            "sent-at": "no"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [208, 0],
+      "id": "node-append-cart-row",
+      "name": "Sheets - append cart row"
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [416, 0],
+      "id": "node-wait",
+      "name": "Wait",
+      "webhookId": "REPLACE_WITH_YOUR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "cart_id",
+              "lookupValue": "={{ $('Webhook - cart created').item.json.body.cart_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [624, 0],
+      "id": "node-lookup-cart-row",
+      "name": "Sheets - look up cart row"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cond-status-abandoned",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "abandoned",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [832, 0],
+      "id": "node-if-still-abandoned",
+      "name": "IF - still abandoned?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.twilio.com/2010-04-01/Accounts/YOUR_TWILIO_ACCOUNT_SID/Messages.json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "authorization",
+              "value": "Basic YOUR_BASE64_ENCODED_SID_AND_AUTH_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "To", "value": "=whatsapp:+YOUR_RECIPIENT_NUMBER" },
+            { "name": "From", "value": "whatsapp:+YOUR_TWILIO_SANDBOX_NUMBER" },
+            { "name": "ContentSid", "value": "YOUR_TWILIO_TEMPLATE_SID" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1104, -176],
+      "id": "node-whatsapp-send",
+      "name": "WhatsApp - send discount"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [1248, 32],
+      "id": "node-gemini-recovery",
+      "name": "Gemini - recovery model"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Write a cart recovery email.\n\nCustomer first name: {{ $('Webhook - cart created').item.json.body.name }}\nItem left in cart: {{ $('Webhook - cart created').item.json.body.items }}\nCart total: Rs. {{ $('Webhook - cart created').item.json.body.total }}\nDiscount: 25% off\nPromo code: SAVE25\nStore link: https://xyz.com",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are the email copywriter for a D2C fashion store. You write short abandoned-cart recovery emails that sound like a friendly human, not a marketing robot.\n\nRules:\n- Body under 120 words. Short paragraphs, 1-2 sentences each.\n- Address the customer by their first name once, at the start.\n- Mention the exact item they left behind, by name.\n- State the offer plainly: 25% off with promo code SAVE25, and that the code is for them personally.\n- Include the link https://xyz.com exactly once, as the call to action.\n- Warm and low-pressure. Never guilt-trip, never use fake countdowns or invented scarcity.\n- Do not invent product details, prices, sizes, delivery times, or an expiry date.\n- No ALL CAPS, no spam words like FREE, URGENT, ACT NOW. One exclamation mark maximum.\n\nReturn only the plain text body of the email. No subject line, no markdown, no preamble.\nUse \\n between paragraphs."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [1312, -176],
+      "id": "node-llm-recovery-email",
+      "name": "LLM - write recovery email"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Sheets - look up cart row').item.json.email }}",
+        "subject": "=Your {{ $('Webhook - cart created').item.json.body.items }} is still waiting",
+        "message": "={{ $json.text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [1664, -176],
+      "id": "node-gmail-recovery",
+      "name": "Gmail - send recovery email",
+      "webhookId": "REPLACE_WITH_YOUR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cart_id": "={{ $('Sheets - look up cart row').item.json.cart_id }}",
+            "recovery-mail": "discount-message-sent",
+            "sent-at": "={{ $now }}"
+          },
+          "matchingColumns": ["cart_id"],
+          "schema": []
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1872, -176],
+      "id": "node-update-recovery-flag",
+      "name": "Sheets - mark recovery sent"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cart-paid",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 320],
+      "id": "node-webhook-cart-paid",
+      "name": "Webhook - cart paid",
+      "webhookId": "REPLACE_WITH_YOUR_WEBHOOK_ID"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cart_id": "={{ $json.body.cart_id }}",
+            "status": "completed",
+            "updated_at": "={{ $now }}"
+          },
+          "matchingColumns": ["cart_id"],
+          "schema": []
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [208, 320],
+      "id": "node-mark-cart-paid",
+      "name": "Sheets - mark cart paid"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "cart_id",
+              "lookupValue": "={{ $('Webhook - cart paid').item.json.body.cart_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [416, 320],
+      "id": "node-read-paid-row",
+      "name": "Sheets - read paid row"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1.1,
+      "position": [560, 528],
+      "id": "node-gemini-confirmation",
+      "name": "Gemini - confirmation model"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Write a cart order completed mail.\n\nCustomer first name: {{ $json.name }}\nItem in cart: {{ $json.items }}\nCart total: Rs. {{ $json.total }}\nDiscount on next order: 25% off\nPromo code: SAVE25\nStore link: https://xyz.com",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are the email copywriter for a D2C fashion store. You write short order confirmation emails that sound like a friendly human, not an automated receipt.\n\nRules:\n- Body under 120 words. Short paragraphs, 1-2 sentences each.\n- Open by thanking the customer by their first name and confirming the order is placed.\n- Name the exact item they ordered and state the order total.\n- The confirmation comes first. Only after that, mention the reward: 25% off their next order with promo code SAVE25.\n- Include the link https://xyz.com exactly once, near the end.\n- Warm and appreciative. Do not upsell hard, do not push urgency, and do not make the discount the main subject of the email.\n- Do not invent delivery dates, tracking numbers, sizes, return windows, or an expiry date for the code.\n- No ALL CAPS, no spam words. One exclamation mark maximum.\n\nReturn only the plain text body of the email. No subject line, no markdown, no preamble.\nUse \\n between paragraphs."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [624, 320],
+      "id": "node-llm-confirmation-email",
+      "name": "LLM - write confirmation email"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Sheets - read paid row').item.json.email }}",
+        "subject": "Thanks for your order",
+        "message": "={{ $json.text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [880, 320],
+      "id": "node-gmail-confirmation",
+      "name": "Gmail - send confirmation",
+      "webhookId": "REPLACE_WITH_YOUR_WEBHOOK_ID"
+    }
+  ],
+  "connections": {
+    "Webhook - cart created": {
+      "main": [
+        [{ "node": "Sheets - append cart row", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets - append cart row": {
+      "main": [[{ "node": "Wait", "type": "main", "index": 0 }]]
+    },
+    "Wait": {
+      "main": [
+        [{ "node": "Sheets - look up cart row", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets - look up cart row": {
+      "main": [
+        [{ "node": "IF - still abandoned?", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF - still abandoned?": {
+      "main": [
+        [{ "node": "WhatsApp - send discount", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "WhatsApp - send discount": {
+      "main": [
+        [{ "node": "LLM - write recovery email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gemini - recovery model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM - write recovery email",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM - write recovery email": {
+      "main": [
+        [{ "node": "Gmail - send recovery email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Gmail - send recovery email": {
+      "main": [
+        [{ "node": "Sheets - mark recovery sent", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook - cart paid": {
+      "main": [
+        [{ "node": "Sheets - mark cart paid", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets - mark cart paid": {
+      "main": [
+        [{ "node": "Sheets - read paid row", "type": "main", "index": 0 }]
+      ]
+    },
+    "Sheets - read paid row": {
+      "main": [
+        [
+          {
+            "node": "LLM - write confirmation email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - confirmation model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "LLM - write confirmation email",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM - write confirmation email": {
+      "main": [
+        [{ "node": "Gmail - send confirmation", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {}
+}
